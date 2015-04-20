@@ -28,7 +28,10 @@ validatePath(){
 
 unzipFile(){
 	zip_path=$1
-	if file --mime-type "$zip_path" | grep -q zip$ || file --mime-type "$zip_path" | grep -q gzip$ ;
+	filename=$(basename "$zip_path")
+	extension="${filename##*.}"
+	echo "extension is "$extension
+	if [ "$extension" = "zip" ];
 	then
 		echo "$2/$3"
 		if [ -d "$2/$3" ] ;
@@ -38,12 +41,14 @@ unzipFile(){
 			unzip $1 -d $2		
 		fi
 		
-	elif file --mime-type "$zip_path" | grep -q war$ :
+	elif [ "$extension" = "war" ];
 	then
 		if [ -d "$2/$3" ] ;
+		
 		then
 			echo $3" zip file already exists in directory"
 		else
+			echo "deploy war file......................................."
 			unzip $1 -d $2/$3		
 		fi
 	else
@@ -53,7 +58,7 @@ unzipFile(){
 }
 
 copyFile(){
-	if [ -d "$2/$3" ] ;
+	if [ -d "$2/$3/CleanCalc" || -d "$2/$3/admin" ] ;
 	then
 		echo $3" folder already exists in directory"
 	else
@@ -121,13 +126,41 @@ source_chekout_path=${prop_value}
 
 getProperty "appm_startup_jar_file_path"
 appm_startup_jar_file_path=${prop_value}
-validatePath $appm_startup_jar_file_path "appm_startup_jar_file_path"
+#validatePath $appm_startup_jar_file_path "appm_startup_jar_file_path"
 
 getProperty "username"
 username=${prop_value}
 
 getProperty "password"
 password=${prop_value}
+
+getProperty "isStacts"
+isStacts=${prop_value} 
+
+getProperty "ip_address"
+ip_address=${prop_value}
+
+getProperty "hit_count" 
+hit_count=${prop_value}
+
+if [ $isStacts = "true" ] ;
+then
+	echo "stacts enabled...................."		
+	getProperty "bam_zip_file"
+	bam_zip_file_path=${prop_value} 
+	echo "bam zip file path "$bam_zip_file_path
+	validatePath $bam_zip_file_path "bam_zip_file"
+
+	getProperty "bam_installation_path"
+	bam_installation_path=${prop_value} 
+	validatePath $bam_installation_path "bam_installation_path"	
+	
+	getFileName $bam_zip_file_path
+	bam_name=${file_name} 
+	unzipFile $bam_zip_file_path $bam_installation_path $bam_name
+
+
+fi
 
 #setting up servers
 #settinguptomcat
@@ -161,35 +194,42 @@ copyFile $notifi_application_folderPath $lampPath"/"$lamp_name"/htdocs" "notifi"
 #deploy mobile application
 copyFile $mobile_application_folderPath $appmPath"/"$appm_name"/repository/resources" "mobileapps"
 
-echo "Starting tomcat......"
-sudo chmod 755 -R $tomcatPath"/"$tomcat_name"/bin"
-sh $tomcatPath"/"$tomcat_name"/bin/startup.sh"
-sudo /etc/init.d/apache2 stop
-sudo $lampPath/lampp/lampp start
-echo "Starting app manager......"
-sudo chmod 755 -R $appmPath"/"$appm_name"/bin"
-gnome-terminal -e  "sh $appmPath/$appm_name/bin/wso2server.sh"
-
 getFileName $appm_startup_jar_file_path
 appm_startup_jarFileName=${file_name}
+
+cp -R "./carbon.xml" $appmPath"/"$appm_name"/repository/conf"
 
 if [ -f "$source_chekout_path/pom.xml" ] ;
 then
 	echo "building from source"
 	if [ ! -f $source_chekout_path"/target/"APPM_Startup-1.0-SNAPSHOT-jar-with-dependencies.jar ];then
-
 		cd $source_chekout_path 
 		mvn clean install
 		cd 
 	fi
-	java -cp $source_chekout_path"/target/"APPM_Startup-1.0-SNAPSHOT-jar-with-dependencies.jar org.wso2.carbon.appmgt.sampledeployer.main.MainController 8080 80 $appmPath"/"$appm_name $username $password
-elif [ $appm_startup_jarFileName=="APPM_Startup-1.0-SNAPSHOT-jar-with-dependencies" ] ;
+		
+elif [ $appm_startup_jarFileName = "APPM_Startup-1.0-SNAPSHOT-jar-with-dependencies" ] ;
 then
 	echo "run it from jar file"
-	java -cp $appm_startup_jar_file_path org.wso2.carbon.appmgt.sampledeployer.main.MainController 8080 80 $appmPath"/"$appm_name $username $password
 else
 	echo "please set valid path for source_checkout_path or appm_startup_jar_file_path "	
 	exit
 fi
+
+if [ $isStacts = "true" ] ;
+then
+  #echo configured appmanager and bam for  Statistics	
+  cp $appmPath/$appm_name/statistics/API_Manager_Analytics.tbox $bam_installation_path/$bam_name/repository/deployment/server/bam-toolbox 
+  java -cp $source_chekout_path"/target/"APPM_Startup-1.0-SNAPSHOT-jar-with-dependencies.jar org.wso2.carbon.appmgt.sampledeployer.main.ConfigureStatisticsMain $appmPath"/"$appm_name $bam_installation_path"/"$bam_name 3 $ip_address
+
+  sudo chmod 755 -R $bam_installation_path"/"$bam_name"/bin"
+  gnome-terminal -e "sh $bam_installation_path/$bam_name/bin/wso2server.sh"
+fi
+
+sudo chmod 755 -R $appmPath"/"$appm_name"/bin"
+gnome-terminal -e  "sh $appmPath/$appm_name/bin/wso2server.sh"
+
+java -cp $source_chekout_path"/target/"APPM_Startup-1.0-SNAPSHOT-jar-with-dependencies.jar org.wso2.carbon.appmgt.sampledeployer.main.ApplicationPublisher 8080 $appmPath"/"$appm_name $username $password $tomcatPath"/"$tomcat_name $lampPath"/"$lamp_name $ip_address $hit_count
+
 
 echo "process complete......."
